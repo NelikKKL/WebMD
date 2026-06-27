@@ -138,6 +138,44 @@ fn split_table_row(line: &str) -> Vec<String> {
 }
 
 /// Task list checkbox at start of list item content.
+
+// Block-level HTML tags per CommonMark spec §4.6 (type 6)
+const BLOCK_TAGS: &[&str] = &[
+    "address", "article", "aside", "base", "basefont", "blockquote", "body",
+    "caption", "center", "col", "colgroup", "dd", "details", "dialog", "dir",
+    "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form",
+    "frame", "frameset", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header",
+    "hr", "html", "iframe", "legend", "li", "link", "main", "menu", "menuitem",
+    "meta", "nav", "noframes", "ol", "optgroup", "option", "p", "param",
+    "search", "section", "summary", "table", "tbody", "td", "tfoot", "th",
+    "thead", "title", "tr", "track", "ul",
+];
+
+/// True when a line opens a raw HTML block (starts with a block-level tag or comment).
+fn is_html_block_start(line: &str) -> bool {
+    let s = line.trim_start();
+    if !s.starts_with('<') { return false; }
+
+    // HTML comment: <!-- ... -->
+    if s.starts_with("<!--") { return true; }
+    // Processing instruction: <?
+    if s.starts_with("<?") { return true; }
+    // CDATA section
+    if s.starts_with("<![CDATA[") { return true; }
+    // DOCTYPE
+    let upper = &s[1..].to_ascii_uppercase();
+    if upper.starts_with("!DOCTYPE") { return true; }
+
+    // Block-level tag (opening or closing)
+    let tag_start = if s.starts_with("</") { &s[2..] } else { &s[1..] };
+    let tag_name: String = tag_start
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
+
+    BLOCK_TAGS.contains(&tag_name.as_str())
+}
 fn detect_checkbox(s: &str) -> Option<(bool, &str)> {
     if s.starts_with("[ ] ") { return Some((false, &s[4..])); }
     if s.starts_with("[x] ") || s.starts_with("[X] ") { return Some((true, &s[4..])); }
@@ -158,10 +196,6 @@ impl BlockParser {
 
     fn line(&self) -> Option<&str> {
         self.lines.get(self.pos).map(|s| s.as_str())
-    }
-
-    fn is_blank(&self, i: usize) -> bool {
-        self.lines.get(i).map(|l| l.trim().is_empty()).unwrap_or(true)
     }
 
     fn skip_blank_lines(&mut self) {
@@ -240,8 +274,43 @@ impl BlockParser {
             return Some(self.parse_table());
         }
 
+        // HTML block: line starts with a block-level HTML tag
+        if is_html_block_start(trimmed) {
+            return Some(self.parse_html_block());
+        }
+
         // Paragraph (catches setext headings inside)
         Some(self.parse_paragraph(min_indent))
+    }
+
+    // ── HTML block ────────────────────────────────────────────────────────────
+
+    /// Collects raw HTML lines until a blank line (type-6/7 rule) or end of input.
+    fn parse_html_block(&mut self) -> Block {
+        let mut lines: Vec<String> = Vec::new();
+        let first = self.lines[self.pos].clone();
+        let is_comment = first.trim_start().starts_with("<!--");
+
+        while !self.at_end() {
+            let line = self.lines[self.pos].clone();
+
+            // Comment block ends at first line containing -->
+            if is_comment && line.contains("-->") {
+                lines.push(line);
+                self.pos += 1;
+                break;
+            }
+
+            // All other block-HTML types end at a blank line
+            if line.trim().is_empty() {
+                break;
+            }
+
+            lines.push(line);
+            self.pos += 1;
+        }
+
+        Block::HtmlBlock(lines.join("\n"))
     }
 
     // ── Fenced code block ─────────────────────────────────────────────────────

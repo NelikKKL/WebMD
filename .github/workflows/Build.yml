@@ -33,15 +33,15 @@ jobs:
         run: |
           npm install -g terser
 
-          # art.txt уже есть в репозитории после checkout — используем его напрямую.
-          # Prepend art comment to the regular build
-          cat art.txt dist/webmd.js > dist/webmd_with_art.js
-          mv dist/webmd_with_art.js dist/webmd.js
+          # ВАЖНО: сначала минифицируем чистый JS, потом добавляем арт.
+          # Если добавить арт раньше — terser упадёт на первом ⣿ символе.
 
-          # Minified build: terser first, then prepend art
-          terser dist/webmd.js --compress --mangle --output dist/webmd.min.temp.js
-          cat art.txt dist/webmd.min.temp.js > dist/webmd.min.js
-          rm dist/webmd.min.temp.js
+          # 1. Минифицируем оригинальный dist/webmd.js (без арта)
+          terser dist/webmd.js --compress --mangle --output dist/webmd.min.js
+
+          # 2. Теперь добавляем арт-комментарий к обоим файлам
+          cat art.txt dist/webmd.js     > dist/tmp.js     && mv dist/tmp.js     dist/webmd.js
+          cat art.txt dist/webmd.min.js > dist/tmp.min.js && mv dist/tmp.min.js dist/webmd.min.js
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
